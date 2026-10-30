@@ -1,0 +1,964 @@
+/* Wide-Grid · 牌桌 v2
+ * 与 style.css 的关系：style.css 负责首页/组牌/换牌这些非对局界面，
+ * 本文件只覆盖 .board.v2 里的对局牌桌。所有规则都带 .v2 前缀，
+ * 优先级高于 style.css 里 .slot.s0 这类双类选择器，后加载即生效。
+ *
+ * 布局：对手在上、我在下，双方单位位贴着中线的对峙带互相面对，
+ * 增益区放在各自最外圈，资源与手牌收进底部条。
+ * 单位换算沿用 .board 的 --u（1 --u = 画布宽度的 1%，画布 2666×1417）。
+ */
+
+/* ============================================================
+   1. 总体骨架
+   ============================================================ */
+.board.v2 {
+  display: flex;
+  flex-direction: column;
+  gap: calc(0.3 * var(--u));
+  padding: calc(0.6 * var(--u)) calc(1.2 * var(--u)) calc(0.6 * var(--u));
+  background:
+    linear-gradient(180deg, #f2eee5 0%, var(--paper) 18%, var(--paper) 72%, #f2eee5 100%);
+}
+
+.board.v2 .half {
+  display: flex;
+  flex-direction: column;
+  gap: calc(0.35 * var(--u));
+  position: relative;
+}
+
+/* style.css 里的 .slot / .wide-zone / .wz1 / .s0 这些规则用的是
+ * 「.pos 绝对定位 + 百分比 left/top」。新牌桌改成 flex 流式布局后
+ * 这些偏移量必须清掉，否则 position:relative 会按百分比把元素推开。
+ * 这里集中重置一次，后面的具体规则只管宽高。 */
+.board.v2 .half,
+.board.v2 .half-head,
+.board.v2 .half-wides,
+.board.v2 .half-units,
+.board.v2 .slot,
+.board.v2 .uslot,
+.board.v2 .u-card,
+.board.v2 .wide-zone,
+.board.v2 .wide-card,
+.board.v2 .owz,
+.board.v2 .vsband,
+.board.v2 .bottom,
+.board.v2 .logbox,
+.board.v2 .flat,
+.board.v2 .deckpile,
+.board.v2 .panel,
+.board.v2 .handzone,
+.board.v2 .hand-list,
+.board.v2 .hcard,
+.board.v2 .preview {
+  top: auto;
+  left: auto;
+  right: auto;
+  bottom: auto;
+  width: auto;
+  height: auto;
+}
+
+/* 中线对峙带：我方的区域 1 正对对手的区域 1，左右不镜像 */
+.board.v2 .half.opp { flex: 0 0 auto; }
+.board.v2 .half.mine { flex: 0 0 auto; }
+
+/* ============================================================
+   2. 对手信息条
+   ============================================================ */
+.board.v2 .half-head {
+  display: flex;
+  align-items: center;
+  gap: calc(1.1 * var(--u));
+  height: calc(2.1 * var(--u));
+  padding: 0 calc(0.6 * var(--u));
+  border-bottom: calc(0.05 * var(--u)) solid var(--line-soft);
+}
+
+.board.v2 .hh-name {
+  font-size: max(calc(1.0 * var(--u)), 13px);
+  font-weight: 700;
+  letter-spacing: 0.12em;
+}
+
+.board.v2 .hh-stat {
+  font-size: max(calc(0.74 * var(--u)), 11px);
+  color: var(--muted);
+  letter-spacing: 0.04em;
+}
+
+.board.v2 .hh-stat b {
+  font-size: max(calc(0.95 * var(--u)), 13px);
+  color: var(--ink);
+  margin-left: calc(0.28 * var(--u));
+  font-variant-numeric: tabular-nums;
+}
+
+/* ============================================================
+   3. 场地区域
+   ============================================================ */
+.board.v2 .half-wides,
+.board.v2 .half-units {
+  display: flex;
+  justify-content: center;
+  align-items: stretch;
+  gap: calc(0.8 * var(--u));
+}
+
+.board.v2 .half-wides { height: calc(6.6 * var(--u)); }
+.board.v2 .half-units { height: calc(9.4 * var(--u)); }
+
+/* ---- 单位位 ---- */
+.board.v2 .slot {
+  position: relative;
+  width: calc(6.6 * var(--u));
+  height: calc(9.4 * var(--u));
+  border: calc(0.05 * var(--u)) solid var(--line-soft);
+  background: var(--paper);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  transition: border-color 0.12s, background 0.12s, transform 0.12s;
+}
+
+.board.v2 .slot.placeable {
+  border-color: var(--accent);
+  border-style: dashed;
+  background: #fdf6f4;
+  cursor: pointer;
+}
+
+.board.v2 .slot.placeable:hover { background: #fbeeea; transform: translateY(calc(-0.2 * var(--u))); }
+
+.board.v2 .us-no,
+.board.v2 .slot-no {
+  position: absolute;
+  background: rgba(253, 252, 250, 0.82);
+  padding: 0 calc(0.16 * var(--u));
+  top: calc(0.12 * var(--u));
+  left: calc(0.2 * var(--u));
+  font-size: max(calc(0.56 * var(--u)), 9px);
+  color: var(--muted);
+  z-index: 3;
+  letter-spacing: 0.03em;
+}
+
+.board.v2 .us-no i,
+.board.v2 .slot-no i {
+  font-style: normal;
+  margin-left: calc(0.18 * var(--u));
+  opacity: 0.75;
+}
+
+.board.v2 .slot-hint,
+.board.v2 .us-empty {
+  border: 0;
+  margin-top: auto;
+  margin-bottom: auto;
+  text-align: center;
+  font-size: max(calc(0.7 * var(--u)), 11px);
+  color: #a9a399;
+  letter-spacing: 0.08em;
+}
+
+.board.v2 .slot.placeable .slot-hint { color: var(--accent); font-weight: 700; }
+
+/* ---- 单位卡（我方） ---- */
+.board.v2 .u-card {
+  position: relative;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  cursor: default;
+}
+
+.board.v2 .slot:has(.u-card) .slot-no { color: #f0ece2; z-index: 5; }
+
+.board.v2 .u-card.tapped { opacity: 0.55; }
+
+.board.v2 .u-card.target {
+  outline: calc(0.12 * var(--u)) solid var(--accent);
+  outline-offset: calc(-0.12 * var(--u));
+}
+
+.board.v2 .uc-face {
+  flex: 0 0 auto;
+  height: calc(4.2 * var(--u));
+  overflow: hidden;
+  background: var(--paper-2);
+  border-bottom: calc(0.04 * var(--u)) solid var(--line-soft);
+}
+
+.board.v2 .uc-face svg { width: 100%; height: 100%; display: block; }
+
+.board.v2 .uc-body {
+  flex: 1;
+  min-height: 0;
+  padding: calc(0.28 * var(--u)) calc(0.32 * var(--u));
+  display: flex;
+  flex-direction: column;
+  gap: calc(0.16 * var(--u));
+  overflow: hidden;
+}
+
+.board.v2 .u-name {
+  flex: 0 0 auto;
+  font-size: max(calc(0.66 * var(--u)), 11px);
+  font-weight: 700;
+  line-height: 1.25;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.board.v2 .u-txt {
+  flex: 1 1 0px;
+  min-height: calc(0.72 * var(--u));
+  font-size: max(calc(0.56 * var(--u)), 9.5px);
+  line-height: 1.38;
+  color: #5e574b;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+}
+
+.board.v2 .u-stats,
+.board.v2 .uc-stats {
+  display: flex;
+  align-items: baseline;
+  gap: calc(0.5 * var(--u));
+  padding: calc(0.2 * var(--u)) calc(0.32 * var(--u)) calc(0.28 * var(--u));
+  border-top: calc(0.04 * var(--u)) solid #e6e1d6;
+}
+
+.board.v2 .u-atk,
+.board.v2 .uc-atk {
+  font-size: max(calc(0.94 * var(--u)), 14px);
+  font-weight: 700;
+  color: #9c2b22;
+  font-variant-numeric: tabular-nums;
+}
+
+.board.v2 .u-hp,
+.board.v2 .uc-hp {
+  font-size: max(calc(0.9 * var(--u)), 13px);
+  font-weight: 700;
+  color: #2f5d50;
+  font-variant-numeric: tabular-nums;
+}
+
+.board.v2 .u-atk i,
+.board.v2 .uc-atk i,
+.board.v2 .u-hp i,
+.board.v2 .uc-hp i {
+  font-style: normal;
+  font-size: max(calc(0.52 * var(--u)), 8.5px);
+  font-weight: 400;
+  opacity: 0.62;
+  margin-left: calc(0.1 * var(--u));
+}
+
+.board.v2 .u-card.boosted .u-atk,
+.board.v2 .uslot.boosted .uc-atk { color: #c2410c; }
+
+.board.v2 .u-tap,
+.board.v2 .uc-tap {
+  position: absolute;
+  top: calc(0.3 * var(--u));
+  right: calc(0.3 * var(--u));
+  font-size: max(calc(0.5 * var(--u)), 8.5px);
+  padding: calc(0.08 * var(--u)) calc(0.24 * var(--u));
+  background: rgba(27, 26, 23, 0.66);
+  color: #f4f1ea;
+  letter-spacing: 0.06em;
+  z-index: 4;
+}
+
+/* ---- 对手单位（可点选为攻击目标） ---- */
+.board.v2 .uslot {
+  position: relative;
+  width: calc(6.6 * var(--u));
+  height: calc(9.4 * var(--u));
+  border: calc(0.05 * var(--u)) solid var(--line-soft);
+  background: var(--paper-2);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  transition: border-color 0.12s, box-shadow 0.12s;
+}
+
+.board.v2 .uslot.on { background: var(--paper); }
+
+.board.v2 .uslot.tapped { opacity: 0.62; }
+
+.board.v2 .uslot.target {
+  border-color: var(--accent);
+  border-width: calc(0.11 * var(--u));
+  cursor: pointer;
+  box-shadow: 0 0 calc(0.8 * var(--u)) rgba(156, 43, 34, 0.28);
+}
+
+.board.v2 .uslot.target:hover { background: #fdf4f1; }
+
+.board.v2 .uc-aim {
+  position: absolute;
+  bottom: calc(0.3 * var(--u));
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: max(calc(0.5 * var(--u)), 8.5px);
+  color: var(--accent);
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  z-index: 4;
+  white-space: nowrap;
+}
+
+/* ---- 增益区 ---- */
+.board.v2 .wide-zone,
+.board.v2 .owz {
+  position: relative;
+  width: calc(12 * var(--u));
+  height: calc(6.6 * var(--u));
+  border: calc(0.05 * var(--u)) solid var(--line-soft);
+  background: var(--paper);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.board.v2 .wide-zone.covered { background: repeating-linear-gradient(45deg, #f7f4ee, #f7f4ee 6px, #efeadf 6px, #efeadf 12px); }
+.board.v2 .wide-zone.placeable { border-color: var(--accent); border-style: dashed; background: #fdf6f4; cursor: pointer; }
+.board.v2 .wide-zone.placeable:hover { background: #fbeeea; }
+
+.board.v2 .wide-empty,
+.board.v2 .owz-empty {
+  margin: auto;
+  font-size: max(calc(0.7 * var(--u)), 11px);
+  color: #a9a399;
+  letter-spacing: 0.08em;
+}
+
+.board.v2 .wide-zone.placeable .wide-empty { color: var(--accent); font-weight: 700; }
+
+.board.v2 .wide-card {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  cursor: pointer;
+}
+
+.board.v2 .wide-card.sel { outline: calc(0.11 * var(--u)) solid var(--accent); outline-offset: calc(-0.11 * var(--u)); }
+
+.board.v2 .wc-face {
+  flex: 0 0 auto;
+  height: calc(2.6 * var(--u));
+  overflow: hidden;
+  border-bottom: calc(0.04 * var(--u)) solid var(--line-soft);
+  background: var(--paper-2);
+}
+
+.board.v2 .wc-face svg { width: 100%; height: 100%; display: block; }
+
+.board.v2 .wc-name {
+  font-size: max(calc(0.62 * var(--u)), 10.5px);
+  font-weight: 700;
+  padding: calc(0.24 * var(--u)) calc(0.34 * var(--u)) 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.board.v2 .wc-meta {
+  font-size: max(calc(0.5 * var(--u)), 8.5px);
+  color: var(--muted);
+  padding: 0 calc(0.34 * var(--u));
+  letter-spacing: 0.03em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.board.v2 .wc-area {
+  font-size: max(calc(0.52 * var(--u)), 8.5px);
+  color: #6b6355;
+  padding: calc(0.1 * var(--u)) calc(0.34 * var(--u)) 0;
+}
+
+.board.v2 .wc-text {
+  flex: 1;
+  min-height: 0;
+  font-size: max(calc(0.52 * var(--u)), 8.5px);
+  line-height: 1.35;
+  color: #5e574b;
+  padding: calc(0.14 * var(--u)) calc(0.34 * var(--u));
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+
+.board.v2 .wc-up {
+  font-size: max(calc(0.48 * var(--u)), 8px);
+  color: var(--accent);
+  padding: 0 calc(0.34 * var(--u)) calc(0.24 * var(--u));
+  letter-spacing: 0.04em;
+}
+
+.board.v2 .wide-shadow,
+.board.v2 .owz-shadow {
+  margin: auto;
+  text-align: center;
+  font-size: max(calc(0.58 * var(--u)), 9.5px);
+  line-height: 1.5;
+  color: #8d8577;
+}
+
+.board.v2 .owz { background: #f7f4ee; }
+.board.v2 .owz.on { background: var(--paper); border-color: #b9b2a3; }
+.board.v2 .owz.up { border-color: var(--accent); }
+
+.board.v2 .owz-name {
+  font-size: max(calc(0.6 * var(--u)), 10px);
+  font-weight: 700;
+  padding: calc(0.24 * var(--u)) calc(0.34 * var(--u)) 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.board.v2 .up-tag {
+  font-size: max(calc(0.44 * var(--u)), 8px);
+  font-weight: 400;
+  color: #f4f1ea;
+  background: var(--accent);
+  padding: 0 calc(0.16 * var(--u));
+  margin-left: calc(0.24 * var(--u));
+  vertical-align: middle;
+}
+
+.board.v2 .owz-meta {
+  font-size: max(calc(0.5 * var(--u)), 8.5px);
+  color: var(--muted);
+  padding: 0 calc(0.34 * var(--u));
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.board.v2 .owz-text {
+  flex: 1;
+  min-height: 0;
+  font-size: max(calc(0.52 * var(--u)), 8.5px);
+  line-height: 1.35;
+  color: #5e574b;
+  padding: calc(0.16 * var(--u)) calc(0.34 * var(--u));
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+}
+
+/* ============================================================
+   4. 中线对峙带
+   ============================================================ */
+.board.v2 .vsband {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  height: calc(2.1 * var(--u));
+  margin: calc(0.3 * var(--u)) 0;
+  border-top: calc(0.05 * var(--u)) solid var(--line-soft);
+  border-bottom: calc(0.05 * var(--u)) solid var(--line-soft);
+  background: linear-gradient(180deg, #f7f4ee, #efeade);
+}
+
+.board.v2 .vs-side {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: calc(0.6 * var(--u));
+  padding: 0 calc(1.0 * var(--u));
+}
+
+.board.v2 .vs-side.opp { justify-content: flex-end; }
+
+.board.v2 .vs-who {
+  font-size: max(calc(0.66 * var(--u)), 10.5px);
+  letter-spacing: 0.16em;
+  color: var(--muted);
+}
+
+.board.v2 .vs-hp {
+  font-size: max(calc(1.5 * var(--u)), 20px);
+  font-weight: 700;
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+}
+
+.board.v2 .vs-hp i {
+  font-style: normal;
+  font-size: max(calc(0.66 * var(--u)), 10.5px);
+  font-weight: 400;
+  color: var(--muted);
+  margin-left: calc(0.1 * var(--u));
+}
+
+.board.v2 .vs-bar {
+  flex: 0 1 calc(9 * var(--u));
+  height: calc(0.38 * var(--u));
+  min-height: 4px;
+  background: #ddd7c9;
+  display: block;
+  position: relative;
+  overflow: hidden;
+}
+
+.board.v2 .vs-bar i { position: absolute; inset: 0 auto 0 0; background: #2f5d50; }
+.board.v2 .vs-side.opp .vs-bar i { background: #9c2b22; left: auto; right: 0; }
+
+.board.v2 .vs-mid {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: calc(0.08 * var(--u));
+  padding: 0 calc(1.6 * var(--u));
+  border-left: calc(0.05 * var(--u)) solid var(--line-soft);
+  border-right: calc(0.05 * var(--u)) solid var(--line-soft);
+}
+
+.board.v2 .vs-turn {
+  font-size: max(calc(0.52 * var(--u)), 8.5px);
+  color: var(--muted);
+  letter-spacing: 0.1em;
+}
+
+.board.v2 .vs-phase {
+  font-size: max(calc(0.78 * var(--u)), 12px);
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  color: #7a7264;
+}
+
+.board.v2 .vs-phase.mine { color: var(--accent); }
+
+/* ============================================================
+   5. 底部条
+   ============================================================ */
+.board.v2 .bottom {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: stretch;
+  gap: calc(0.8 * var(--u));
+  height: calc(13.0 * var(--u));
+  padding-top: calc(0.5 * var(--u));
+  border-top: calc(0.05 * var(--u)) solid var(--line-soft);
+  margin-top: auto;
+}
+
+/* ---- 日志 ---- */
+.board.v2 .bottom > * {
+  min-width: 0;
+  overflow: hidden;
+}
+
+.board.v2 .logbox {
+  flex: 0 1 calc(10 * var(--u));
+  border: calc(0.04 * var(--u)) solid #e6e1d6;
+  background: #faf8f3;
+  overflow-y: auto;
+  padding: calc(0.3 * var(--u));
+  font-size: max(calc(0.54 * var(--u)), 9px);
+  line-height: 1.45;
+}
+
+.board.v2 .log-row { color: #5e574b; }
+.board.v2 .log-row .t { color: #a09786; font-style: normal; margin-right: calc(0.24 * var(--u)); }
+
+/* ---- 定义牌 / 定义判定 / 弃牌堆 ---- */
+.board.v2 .flat {
+  flex: 0 1 calc(5.6 * var(--u));
+  border: calc(0.04 * var(--u)) solid #e6e1d6;
+  background: #faf8f3;
+  padding: calc(0.4 * var(--u));
+  display: flex;
+  flex-direction: column;
+  gap: calc(0.16 * var(--u));
+  overflow: hidden;
+}
+
+.board.v2 .flat-title {
+  font-size: max(calc(0.58 * var(--u)), 9.5px);
+  letter-spacing: 0.12em;
+  color: var(--muted);
+  border-bottom: calc(0.03 * var(--u)) solid #e6e1d6;
+  padding-bottom: calc(0.18 * var(--u));
+}
+
+.board.v2 .flat-big {
+  font-size: max(calc(1.6 * var(--u)), 20px);
+  font-weight: 700;
+  line-height: 1;
+  color: var(--ink);
+}
+
+.board.v2 .flat-note {
+  font-size: max(calc(0.48 * var(--u)), 8px);
+  line-height: 1.4;
+  color: #8d8577;
+}
+
+.board.v2 .discard-list {
+  font-size: max(calc(0.48 * var(--u)), 8px);
+  line-height: 1.5;
+  color: #6b6355;
+  overflow: hidden;
+}
+
+/* ---- 手牌 ---- */
+.board.v2 .handzone {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: calc(0.3 * var(--u));
+}
+
+.board.v2 .hand-head {
+  display: flex;
+  justify-content: space-between;
+  font-size: max(calc(0.56 * var(--u)), 9.5px);
+  color: var(--muted);
+  letter-spacing: 0.1em;
+  border-bottom: calc(0.03 * var(--u)) solid #e6e1d6;
+  padding-bottom: calc(0.14 * var(--u));
+}
+
+.board.v2 .hand-list {
+  flex: 1;
+  display: flex;
+  flex-direction: row;
+  gap: calc(0.5 * var(--u));
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding-bottom: calc(0.18 * var(--u));
+}
+
+.board.v2 .hcard {
+  position: relative;
+  flex: 0 0 calc(6.0 * var(--u));
+  align-items: stretch;
+  height: calc(9.2 * var(--u));
+  border: calc(0.05 * var(--u)) solid #ddd7c9;
+  background: var(--paper);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  cursor: pointer;
+  transition: transform 0.1s, border-color 0.1s, box-shadow 0.1s;
+}
+
+.board.v2 .hcard.playable { border-color: #b9b2a3; }
+.board.v2 .hcard.playable:hover { transform: translateY(calc(-0.35 * var(--u))); box-shadow: 0 calc(0.3 * var(--u)) calc(0.8 * var(--u)) rgba(27, 26, 23, 0.14); }
+.board.v2 .hcard.sel { border-color: var(--accent); border-width: calc(0.11 * var(--u)); }
+.board.v2 .hcard:not(.playable) { opacity: 0.62; }
+
+.board.v2 .hc-cost {
+  position: absolute;
+  top: calc(0.2 * var(--u));
+  left: calc(0.2 * var(--u));
+  z-index: 4;
+  min-width: calc(1.1 * var(--u));
+  height: calc(1.1 * var(--u));
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: max(calc(0.7 * var(--u)), 11px);
+  font-weight: 700;
+  color: #f4f1ea;
+  background: rgba(27, 26, 23, 0.78);
+  border-radius: 50%;
+}
+
+.board.v2 .hc-face {
+  flex: 0 0 auto;
+  height: calc(4.2 * var(--u));
+  overflow: hidden;
+  background: var(--paper-2);
+  border-bottom: calc(0.04 * var(--u)) solid #e6e1d6;
+}
+
+.board.v2 .hc-face svg { width: 100%; height: 100%; display: block; }
+
+.board.v2 .hc-body {
+  flex: 1;
+  min-height: 0;
+  padding: calc(0.26 * var(--u)) calc(0.3 * var(--u));
+  display: flex;
+  flex-direction: column;
+  gap: calc(0.1 * var(--u));
+  overflow: hidden;
+}
+
+.board.v2 .hc-name {
+  font-size: max(calc(0.6 * var(--u)), 10px);
+  font-weight: 700;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.board.v2 .hc-sum {
+  font-size: max(calc(0.48 * var(--u)), 8px);
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.board.v2 .hc-txt {
+  font-size: max(calc(0.46 * var(--u)), 8px);
+  line-height: 1.35;
+  color: #6b6355;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+
+.board.v2 .hand-empty {
+  margin: auto;
+  font-size: max(calc(0.7 * var(--u)), 11px);
+  color: #a9a399;
+  letter-spacing: 0.1em;
+}
+
+/* ---- 主牌组 ---- */
+.board.v2 .deckpile {
+  flex: 0 1 calc(5.2 * var(--u));
+  border: calc(0.04 * var(--u)) solid #ddd7c9;
+  background: repeating-linear-gradient(135deg, #f7f4ee, #f7f4ee 5px, #efeade 5px, #efeade 10px);
+  padding: calc(0.4 * var(--u));
+  display: flex;
+  flex-direction: column;
+  gap: calc(0.1 * var(--u));
+}
+
+.board.v2 .deck-count {
+  font-size: max(calc(1.7 * var(--u)), 21px);
+  font-weight: 700;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---- 面板 ---- */
+.board.v2 .panel {
+  flex: 0 1 calc(14 * var(--u));
+  border: calc(0.04 * var(--u)) solid #ddd7c9;
+  background: #faf8f3;
+  padding: calc(0.4 * var(--u)) calc(0.5 * var(--u));
+  display: flex;
+  flex-direction: column;
+  gap: calc(0.16 * var(--u));
+  overflow: hidden;
+}
+
+.board.v2 .pn-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+}
+
+.board.v2 .pn-lab {
+  font-size: max(calc(0.52 * var(--u)), 8.5px);
+  color: var(--muted);
+  letter-spacing: 0.1em;
+}
+
+.board.v2 .pn-num {
+  font-size: max(calc(0.86 * var(--u)), 12px);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+}
+
+.board.v2 .pn-num small {
+  font-size: max(calc(0.5 * var(--u)), 8.5px);
+  font-weight: 400;
+  color: var(--muted);
+  margin-left: calc(0.12 * var(--u));
+}
+
+.board.v2 .hpbar {
+  display: block;
+  height: calc(0.28 * var(--u));
+  min-height: 3px;
+  background: #ddd7c9;
+  position: relative;
+  overflow: hidden;
+}
+
+.board.v2 .hpbar i { position: absolute; inset: 0 auto 0 0; background: #2f5d50; }
+
+.board.v2 .pips {
+  display: flex;
+  gap: calc(0.16 * var(--u));
+  flex-wrap: wrap;
+}
+
+.board.v2 .pips span {
+  width: calc(0.52 * var(--u));
+  height: calc(0.52 * var(--u));
+  min-width: 4px;
+  min-height: 4px;
+  border: calc(0.04 * var(--u)) solid #cfc8b8;
+  background: transparent;
+}
+
+.board.v2 .pips span.on { background: #c9a227; border-color: #c9a227; }
+
+.board.v2 .pn-turn {
+  font-size: max(calc(0.58 * var(--u)), 9.5px);
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  color: var(--accent);
+}
+
+.board.v2 .pn-note {
+  font-size: max(calc(0.46 * var(--u)), 8px);
+  line-height: 1.35;
+  color: #8d8577;
+  min-height: calc(0.9 * var(--u));
+}
+
+.board.v2 .pn-btns {
+  margin-top: auto;
+  display: flex;
+  gap: calc(0.3 * var(--u));
+  flex-wrap: wrap;
+}
+
+.board.v2 .pn-btns .btn {
+  font-size: max(calc(0.6 * var(--u)), 10px);
+  padding: calc(0.26 * var(--u)) calc(0.5 * var(--u));
+  border: calc(0.05 * var(--u)) solid var(--line);
+  background: var(--paper);
+  color: var(--ink);
+  letter-spacing: 0.06em;
+  white-space: nowrap;
+  transition: background 0.1s;
+}
+
+.board.v2 .pn-btns .btn:hover { background: #efeade; }
+.board.v2 .pn-btns .btn-alt { background: var(--ink); color: var(--paper); border-color: var(--ink); }
+.board.v2 .pn-btns .btn-alt:hover { background: #33322d; }
+.board.v2 .pn-btns .btn-min { font-size: max(calc(0.52 * var(--u)), 9px); padding: calc(0.2 * var(--u)) calc(0.36 * var(--u)); }
+
+/* 手牌选中时面板里那个「升级」小按钮 */
+.board.v2 .btn-min.btn-alt { font-size: max(calc(0.5 * var(--u)), 9px); }
+
+/* ============================================================
+   6. 大卡预览（浮层，居中）
+   ============================================================ */
+.board.v2 .preview.pos {
+  position: absolute;
+  left: calc(1.4 * var(--u));
+  top: calc(6 * var(--u));
+  transform: none;
+  display: flex;
+  gap: calc(1.0 * var(--u));
+  align-items: stretch;
+  width: auto;
+  max-width: calc(36 * var(--u));
+  min-width: calc(24 * var(--u));
+  padding: calc(0.8 * var(--u));
+  background: rgba(253, 252, 250, 0.97);
+  border: calc(0.06 * var(--u)) solid var(--line);
+  box-shadow: 0 calc(0.6 * var(--u)) calc(2.2 * var(--u)) rgba(27, 26, 23, 0.22);
+  pointer-events: none;
+  z-index: 40;
+}
+
+.board.v2 .pv-art {
+  flex: 0 0 calc(9 * var(--u));
+  border: calc(0.04 * var(--u)) solid #e6e1d6;
+  background: var(--paper-2);
+  overflow: hidden;
+}
+
+.board.v2 .pv-art svg { width: 100%; height: 100%; display: block; }
+
+.board.v2 .pv-info {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: calc(0.3 * var(--u));
+}
+
+.board.v2 .pv-top {
+  display: flex;
+  align-items: center;
+  gap: calc(0.5 * var(--u));
+}
+
+.board.v2 .pv-cost {
+  min-width: calc(1.4 * var(--u));
+  height: calc(1.4 * var(--u));
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: max(calc(0.86 * var(--u)), 13px);
+  font-weight: 700;
+  color: #f4f1ea;
+  background: var(--ink);
+  border-radius: 50%;
+}
+
+.board.v2 .pv-name {
+  font-size: max(calc(1.1 * var(--u)), 16px);
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+
+.board.v2 .pv-type {
+  font-size: max(calc(0.54 * var(--u)), 9px);
+  color: var(--muted);
+  border: calc(0.04 * var(--u)) solid #ddd7c9;
+  padding: 0 calc(0.26 * var(--u));
+  letter-spacing: 0.08em;
+}
+
+.board.v2 .pv-mid {
+  font-size: max(calc(0.58 * var(--u)), 9.5px);
+  color: #6b6355;
+  letter-spacing: 0.03em;
+}
+
+.board.v2 .pv-text {
+  font-size: max(calc(0.68 * var(--u)), 11px);
+  line-height: 1.6;
+  color: var(--ink);
+}
+
+.board.v2 .pv-hint {
+  font-size: max(calc(0.56 * var(--u)), 9.5px);
+  color: var(--accent);
+  letter-spacing: 0.04em;
+}
+
+/* ============================================================
+   7. 窄屏兜底：窗口比例不是 1.88 时 board 会留白，但内部不要挤死
+   ============================================================ */
+@media (max-aspect-ratio: 5/4) {
+  .board.v2 { gap: calc(0.2 * var(--u)); }
+  .board.v2 .half-wides { height: calc(6.2 * var(--u)); }
+  .board.v2 .half-units { height: calc(8.4 * var(--u)); }
+  .board.v2 .slot,
+  .board.v2 .uslot { height: calc(8.4 * var(--u)); }
+}

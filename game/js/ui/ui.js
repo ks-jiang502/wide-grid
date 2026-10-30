@@ -187,8 +187,28 @@
     }
   }
 
+  // 动作 -> 音效名。没有对应项的动作不发声；audio.js 未加载时 sfx() 自己静默返回。
+  var ACT_SFX = {
+    random: 'click', builder: 'click', 'bd-start': 'click', restart: 'click',
+    rules: 'click', 'rules-close': 'click',
+    'bd-add': 'select', 'bd-clear': 'cancel', 'bd-random': 'select',
+    'hand-sel': 'select', 'unit-sel': 'select', 'wide-sel': 'select', 'pick-t': 'select',
+    'pick-cancel': 'cancel', home: 'cancel',
+    'mull-t': 'select', 'mull-ok': 'mulligan',
+    'play-unit': 'play', 'play-wide': 'wide', 'wide-up': 'upgrade',
+    'atk-unit': 'attack', 'atk-face': 'attack', resolve: 'hit',
+    'to-combat': 'turn', 'end-turn': 'turn'
+  };
+
+  function playSfxFor(act) {
+    if (!act) return;
+    var n = ACT_SFX[act];
+    if (n) sfx(n);
+  }
+
   function handle(act, arg, el) {
     var st = S.st;
+    playSfxFor(act);
 
     // ---- 欢迎 / 自选 ----
     if (act === 'random') { startMatch(randomDeck()); return; }
@@ -697,31 +717,171 @@
   // ============================================================
   // 视图：牌桌
   // ============================================================
+  // ---- 卡面 / 音效的软依赖 ----
+  // cardface.js 与 audio.js 是独立模块，可能还没加载（或加载失败）。
+  // 这里全部做降级，缺了就退化成纯文字卡面，绝不让主界面崩。
+  function faceArt(c, opts) {
+    try {
+      if (window.WG && WG.CardFace && WG.CardFace.art) return WG.CardFace.art(c, opts || {});
+    } catch (e) { /* 卡面画不出来不影响对局 */ }
+    return '';
+  }
+  function faceThumb(c, opts) {
+    try {
+      if (window.WG && WG.CardFace && WG.CardFace.thumb) return WG.CardFace.thumb(c, opts || {});
+    } catch (e) { /* 同上 */ }
+    return '';
+  }
+  function sfx(name) {
+    try {
+      if (window.WG && WG.Audio && WG.Audio.sfx) WG.Audio.sfx(name);
+    } catch (e) { /* 没声音也能玩 */ }
+  }
+
+  // ---- 牌桌：上下对称的双人桌面 ----
+  // 参照对决类卡牌游戏的牌桌：对手在上、我在下，双方单位位贴着中线互相面对，
+  // 增益区放到各自最外圈，资源与手牌收到底部条。这样对方出的牌一直在视野里。
   function viewTable() {
     var st = S.st;
     if (!st) return '<div class="stage"><div class="screen">没有进行中的对局</div></div>';
     refreshPlay();
     S.tg = attackableSet();
     var me = st.players[0];
+    var op = st.players[1];
 
-    var h = '<div class="stage"><div class="board">';
-    h += oppbar(st);
-    h += '<div class="title pos">Wide–Grid</div>';
-    h += defCardBox(me);
-    h += defJudgeBox(me);
-    h += discardBox(me);
-    h += wideZone(1, me) + wideZone(2, me) + wideZone(3, me);
-    for (var i = 0; i < 6; i += 1) h += slotBox(i, me);
-    h += deckBox(me);
-    h += handBox(me);
-    h += panelBox(st, me);
-    h += logBox(st);
+    var h = '<div class="stage"><div class="board v2">';
+    h += oppField(st, op);
+    h += vsBand(st, me, op);
+    h += myField(st, me);
+    h += bottomBar(st, me);
     h += previewBox(me);
     h += pickBox();
     if (S.rules) h += rulesOverlay();
     if (st.over) h += overOverlay(st);
     h += '</div></div>';
     return h;
+  }
+
+  // ---- 对手半场：增益区在最上，单位位贴中线 ----
+  function oppField(st, p) {
+    var h = '<div class="half opp">';
+    h += '<div class="half-head">'
+      + '<span class="hh-name">' + esc(p.name) + '</span>'
+      + '<span class="hh-stat">生命 <b>' + p.hp + '</b></span>'
+      + '<span class="hh-stat">能量 <b>' + p.energy + '/' + p.maxEnergy + '</b></span>'
+      + '<span class="hh-stat">牌库 <b>' + p.deck.length + '</b></span>'
+      + '<span class="hh-stat">手牌 <b>' + p.hand.length + '</b></span>'
+      + '<span class="hh-stat">弃牌 <b>' + p.discard.length + '</b></span>'
+      + '</div>';
+
+    h += '<div class="half-wides">';
+    for (var a = 1; a <= 3; a += 1) h += oppWide(st, a, p);
+    h += '</div>';
+
+    h += '<div class="half-units">';
+    for (var i = 0; i < 6; i += 1) h += oppSlot(st, i, p);
+    h += '</div>';
+    h += '</div>';
+    return h;
+  }
+
+  // 对手的宽幅卡：只读展示，不提供升级等交互
+  function oppWide(st, a, p) {
+    var w = p.wides[a];
+    if (w && w.areas && Number(w.areas[0]) !== a) w = null;   // 跨区卡只画在主区
+    if (w) {
+      var c = card(w.cardId);
+      return '<div class="owz on' + (w.upgraded ? ' up' : '') + '">'
+        + '<div class="wc-face">' + faceThumb(c, { variant: w.upgraded ? 'upgraded' : 'normal', side: 'opp' }) + '</div>'
+        + '<div class="owz-name">' + esc(cname(w.cardId))
+        + (w.upgraded ? '<span class="up-tag">强化</span>' : '') + '</div>'
+        + '<div class="owz-meta">' + areasText(w, a) + ' · ' + esc(c.wcat || '增益') + '</div>'
+        + '<div class="owz-text">' + esc(c.text || '') + '</div>'
+        + '</div>';
+    }
+    var cov = coverBy(p, a);
+    if (cov) {
+      return '<div class="owz covered"><div class="owz-shadow">区' + a
+        + '<br>被《' + esc(cname(cov.cardId)) + '》覆盖</div></div>';
+    }
+    return '<div class="owz"><span class="owz-empty">区' + a + ' 空</span></div>';
+  }
+
+  // 对手的单位：玩家在战斗阶段能点它发起攻击，所以这里必须是真的卡面而不是缩写
+  function oppSlot(st, i, p) {
+    var u = p.units[i];
+    var area = areaOf(i);
+    var head = '<span class="us-no">' + (i + 1) + '<i>区' + area + '</i></span>';
+    if (!u) {
+      return '<div class="uslot empty">' + head + '<span class="us-empty">空位</span></div>';
+    }
+    var atk = E.effAtk(st, u);
+    var hp = E.effHp(st, u);
+    var mx = E.effMaxHp(st, u);
+    var c = card(u.cardId);
+    var isTg = !!S.tg[u.uid];
+    var cls = 'uslot on'
+      + (u.exhausted ? ' tapped' : '')
+      + ((atk !== u.atk) || (mx !== u.maxHp) ? ' boosted' : '')
+      + (isTg ? ' target' : '');
+    var act = isTg ? ' data-act="atk-unit" data-arg="' + u.uid + '"' : '';
+    return '<div class="' + cls + '"' + act + '>' + head
+      + '<div class="uc-face">' + faceThumb(c, { variant: u.upgraded ? 'upgraded' : 'normal', side: 'opp' }) + '</div>'
+      + '<div class="uc-body">'
+      + '<div class="uc-name">' + esc(c.name) + '</div>'
+      + '<div class="uc-txt">' + esc(c.text || '（无效果）') + '</div>'
+      + '</div>'
+      + '<div class="uc-stats"><span class="uc-atk">' + atk + '<i>攻</i></span>'
+      + '<span class="uc-hp">' + hp + '/' + mx + '<i>血</i></span></div>'
+      + (u.exhausted ? '<div class="uc-tap">已行动</div>' : '')
+      + (isTg ? '<div class="uc-aim">点击攻击</div>' : '')
+      + '</div>';
+  }
+
+  // ---- 中线：双方生命对峙 + 当前阶段 ----
+  function vsBand(st, me, op) {
+    var mine = (st.active === 0);
+    var maxHp = WG.START_HP || 15;
+    var mPct = Math.max(0, Math.min(100, Math.round(me.hp / maxHp * 100)));
+    var oPct = Math.max(0, Math.min(100, Math.round(op.hp / maxHp * 100)));
+    return '<div class="vsband">'
+      + '<div class="vs-side me"><span class="vs-who">你</span>'
+      + '<span class="vs-hp">' + me.hp + '<i>/' + maxHp + '</i></span>'
+      + '<span class="vs-bar"><i style="width:' + mPct + '%"></i></span></div>'
+      + '<div class="vs-mid"><span class="vs-turn">回合 ' + st.turnCount + '</span>'
+      + '<span class="vs-phase' + (mine ? ' mine' : '') + '">'
+      + (st.over ? '对局结束' : (mine ? '你的 ' : '对手的 ') + esc(phaseCN(st.phase)))
+      + '</span></div>'
+      + '<div class="vs-side opp"><span class="vs-hp">' + op.hp + '<i>/' + maxHp + '</i></span>'
+      + '<span class="vs-bar"><i style="width:' + oPct + '%"></i></span>'
+      + '<span class="vs-who">对手</span></div>'
+      + '</div>';
+  }
+
+  // ---- 我方半场：单位位贴中线，增益区在下 ----
+  function myField(st, me) {
+    var h = '<div class="half mine">';
+    h += '<div class="half-units">';
+    for (var i = 0; i < 6; i += 1) h += slotBox(i, me);
+    h += '</div>';
+    h += '<div class="half-wides">';
+    h += wideZone(1, me) + wideZone(2, me) + wideZone(3, me);
+    h += '</div>';
+    h += '</div>';
+    return h;
+  }
+
+  // ---- 底部条：日志 · 定义牌组 · 手牌 · 牌库与面板 ----
+  function bottomBar(st, me) {
+    return '<div class="bottom">'
+      + logBox(st)
+      + defCardBox(me)
+      + defJudgeBox(me)
+      + discardBox(me)
+      + handBox(me)
+      + deckBox(me)
+      + panelBox(st, me)
+      + '</div>';
   }
 
   function refreshPlay() {
@@ -743,56 +903,10 @@
     return set;
   }
 
-  // ---- 对手信息条 ----
-  function oppbar(st) {
-    var f = st.players[1];
-    var tags = '';
-    for (var a = 1; a <= 3; a += 1) {
-      var w = f.wides[a];
-      if (w) {
-        tags += '<span class="ob-tag on">区' + a + ' ' + esc(cname(w.cardId))
-          + (w.upgraded ? '·强化' : '') + '</span>';
-      } else if (coverBy(f, a)) {
-        tags += '<span class="ob-tag">区' + a + ' 被覆盖</span>';
-      } else {
-        tags += '<span class="ob-tag">区' + a + ' 空</span>';
-      }
-    }
-
-    var units = '';
-    for (var s = 0; s < 6; s += 1) {
-      var u = f.units[s];
-      var area = areaOf(s);
-      if (u) {
-        var cls = 'ob-unit' + (u.exhausted ? ' off' : '') + (S.tg[u.uid] ? ' target' : '');
-        var act = S.tg[u.uid]
-          ? ' data-act="atk-unit" data-arg="' + u.uid + '"' : '';
-        units += '<div class="' + cls + '"' + act + '>'
-          + '<em>' + esc(cname(u.cardId).charAt(0)) + '</em>'
-          + '<i>' + E.effAtk(st, u) + '/' + E.effHp(st, u) + '</i>'
-          + '<u>区' + area + '</u></div>';
-      } else {
-        units += '<div class="ob-unit empty"><em>—</em><u>区' + area + '</u></div>';
-      }
-    }
-
-    return '<div class="oppbar pos">'
-      + '<div class="ob-id">'
-      + '<span class="ob-name">' + esc(f.name) + '</span>'
-      + '<span class="ob-stat">生命 <b>' + f.hp + '</b></span>'
-      + '<span class="ob-stat">能量 <b>' + f.energy + '/' + f.maxEnergy + '</b></span>'
-      + '<span class="ob-stat">牌组 <b>' + f.deck.length + '</b></span>'
-      + '<span class="ob-stat">手牌 <b>' + f.hand.length + '</b></span>'
-      + '</div>'
-      + '<div class="ob-wides">' + tags + '</div>'
-      + '<div class="ob-units">' + units + '</div>'
-      + '</div>';
-  }
-
   // ---- 定义牌 / 定义判定 / 弃牌堆 ----
   function defCardBox(p) {
     var d = p.definition || { charge: 0, lockedAreas: [] };
-    return '<div class="def-card pos flat">'
+    return '<div class="def-card flat">'
       + '<span class="flat-title">定义牌</span>'
       + '<span class="flat-big">—</span>'
       + '<span class="flat-note">本卡表没有赋予定义牌的卡牌，此位常空。</span>'
@@ -804,7 +918,7 @@
     var d = p.definition || { charge: 0, lockedAreas: [] };
     var locked = d.lockedAreas || [];
     var txt = locked.length ? ('锁定 ' + locked.join('、') + ' 区') : '无锁定区域';
-    return '<div class="def-judge pos flat">'
+    return '<div class="def-judge flat">'
       + '<span class="flat-title">定义判定</span>'
       + '<span class="flat-note">' + esc(txt) + '</span>'
       + '<span class="flat-note">判定后持续 ' + (WG.DEF_LOCK_TURNS || 2) + ' 回合</span>'
@@ -818,7 +932,7 @@
     for (var i = from; i < d.length; i += 1) {
       last += esc(cname(d[i].cardId)) + '<br>';
     }
-    return '<div class="discard pos flat">'
+    return '<div class="discard flat">'
       + '<span class="flat-title">弃牌堆</span>'
       + '<span class="flat-big">' + d.length + '</span>'
       + '<div class="discard-list">' + (last || '<span class="flat-note">空</span>') + '</div>'
@@ -845,9 +959,11 @@
       } else if (w.upgraded) {
         upBtn = '<span class="wc-up">已是强化形态</span>';
       }
-      return '<div class="wide-zone pos wz' + a + '">'
+      return '<div class="wide-zone wz' + a + '">'
         + '<div class="wide-card' + (w.upgraded ? ' up' : '') + selCls
         + '" data-act="wide-sel" data-arg="' + a + '">'
+        + '<div class="wc-face">' + faceThumb(card(w.cardId),
+          { variant: w.upgraded ? 'upgraded' : 'normal', side: 'me' }) + '</div>'
         + '<div class="wc-name">' + esc(cname(w.cardId)) + '</div>'
         + '<div class="wc-meta">' + (w.upgraded ? '强化形态' : '初始形态')
         + ' · ' + esc(card(w.cardId).wcat || '增益') + '</div>'
@@ -859,7 +975,7 @@
 
     var cov = coverBy(p, a);
     if (cov) {
-      return '<div class="wide-zone pos wz' + a + ' covered">'
+      return '<div class="wide-zone wz' + a + ' covered">'
         + '<div class="wide-shadow">区' + a + '<br>由《' + esc(cname(cov.cardId)) + '》跨区覆盖</div>'
         + '</div>';
     }
@@ -872,11 +988,11 @@
       }
     }
     if (cand) {
-      return '<div class="wide-zone pos wz' + a + ' placeable" data-act="play-wide" '
+      return '<div class="wide-zone wz' + a + ' placeable" data-act="play-wide" '
         + 'data-arg="' + cand.join(',') + '">'
         + '<div class="wide-empty">放' + cand.join('·') + '区</div></div>';
     }
-    return '<div class="wide-zone pos wz' + a + '">'
+    return '<div class="wide-zone wz' + a + '">'
       + '<div class="wide-empty">区' + a + '</div></div>';
   }
 
@@ -897,20 +1013,23 @@
         + (boosted ? ' boosted' : '')
         + (S.selUid === u.uid ? ' target' : '');
       var sel = (st.phase === 'combat') ? ' data-act="unit-sel" data-arg="' + u.uid + '"' : '';
-      return '<div class="slot pos s' + i + '">' + head
+      return '<div class="slot s' + i + '">' + head
         + '<div class="' + cls + '"' + sel + '>'
+        + '<div class="uc-face">' + faceThumb(card(u.cardId), { side: 'me' }) + '</div>'
+        + '<div class="uc-body">'
         + '<div class="u-name">' + esc(cname(u.cardId)) + '</div>'
-        + (u.exhausted ? '<div class="u-tap">已行动</div>' : '')
         + '<div class="u-txt">' + esc(ctext(u.cardId)) + '</div>'
+        + '</div>'
         + '<div class="u-stats"><span class="u-atk">' + atk
         + '<i>攻</i></span>'
         + '<span class="u-hp">' + hp + '/' + mx + '<i>血</i></span></div>'
+        + (u.exhausted ? '<div class="u-tap">已行动</div>' : '')
         + '</div></div>';
     }
 
     var placeable = !!(S.play && S.play.ok && S.play.type === 'unit'
       && S.play.needSlots.indexOf(i) >= 0);
-    return '<div class="slot pos s' + i + (placeable ? ' placeable' : '') + '"'
+    return '<div class="slot s' + i + (placeable ? ' placeable' : '') + '"'
       + (placeable ? ' data-act="play-unit" data-arg="' + i + '"' : '') + '>'
       + head
       + '<div class="slot-hint">' + (placeable ? '放置' : '空位') + '</div>'
@@ -919,7 +1038,7 @@
 
   // ---- 主牌组 ----
   function deckBox(p) {
-    return '<div class="deckpile pos">'
+    return '<div class="deckpile">'
       + '<span class="flat-title">主牌组</span>'
       + '<span class="deck-count">' + p.deck.length + '</span>'
       + '<span class="flat-note">张 · 耗尽即判负</span>'
@@ -940,13 +1059,15 @@
       rows += '<div class="hcard' + (ok ? ' playable' : '') + (S.sel === i ? ' sel' : '')
         + '" data-act="hand-sel" data-arg="' + i + '">'
         + '<span class="hc-cost">' + c.cost + '</span>'
+        + '<div class="hc-face">' + faceThumb(c, { side: 'me' }) + '</div>'
+        + '<div class="hc-body">'
         + '<div class="hc-name">' + esc(c.name) + '</div>'
         + '<div class="hc-sum">' + esc(sum) + '</div>'
         + '<div class="hc-txt">' + esc(c.text || '（无效果）') + '</div>'
-        + '</div>';
+        + '</div></div>';
     }
     if (!p.hand.length) rows = '<div class="hand-empty">手牌为空</div>';
-    return '<div class="handzone pos">'
+    return '<div class="handzone">'
       + '<div class="hand-head"><span>手牌</span><span>' + p.hand.length + ' 张</span></div>'
       + '<div class="hand-list">' + rows + '</div>'
       + '</div>';
@@ -989,7 +1110,7 @@
     var who = st.over ? '对局结束' : (mine ? '你的回合' : '对手回合');
     var maxHp = WG.START_HP || 15;
     var hpPct = Math.max(0, Math.min(100, Math.round(p.hp / maxHp * 100)));
-    return '<div class="panel pos">'
+    return '<div class="panel">'
       + '<div class="pn-row"><span class="pn-lab">回合</span>'
       + '<span class="pn-num">' + st.turnCount
       + '<small>' + esc(phaseCN(st.phase)) + '</small></span></div>'
@@ -1015,7 +1136,7 @@
       rows += '<div class="log-row"><i class="t">T' + r.turn + '·'
         + esc(phaseCN(r.phase)) + '</i>' + esc(r.text) + '</div>';
     }
-    return '<div class="logbox pos"><div class="log-inner">' + rows + '</div></div>';
+    return '<div class="logbox"><div class="log-inner">' + rows + '</div></div>';
   }
 
   // ---- 大卡预览 ----
@@ -1041,13 +1162,15 @@
     if (S.play) hint = S.play.ok ? '合法位置已高亮 · 点击放置' : (S.play.reason || '');
 
     return '<div class="preview pos">'
+      + '<div class="pv-art">' + faceArt(c, { w: 320, h: 448, side: 'me' }) + '</div>'
+      + '<div class="pv-info">'
       + '<div class="pv-top"><span class="pv-cost">' + c.cost + '</span>'
       + '<span class="pv-name">' + esc(c.name) + '</span>'
       + '<span class="pv-type">' + (c.type === 'wide' ? '宽幅' : '单位') + '</span></div>'
       + '<div class="pv-mid">' + esc(meta) + '</div>'
       + '<div class="pv-text">' + esc(c.text || '（无效果）') + '</div>'
       + (hint ? '<div class="pv-hint">' + esc(hint) + '</div>' : '')
-      + '</div>';
+      + '</div></div>';
   }
 
   // ---- 目标选择面板 ----
@@ -1117,6 +1240,23 @@
     } catch (err) { /* 无 DOM 环境忽略 */ }
   }
 
+  // 界面 -> 背景音乐切轨；结算出现时补一声胜负音（只响一次）。
+  // audio.js 缺席、还没 init、或浏览器不给声，都静默跳过。
+  function syncAudio() {
+    try {
+      if (window.WG && WG.Audio && WG.Audio.bgm) {
+        var want = (S.screen === 'mulligan' || S.screen === 'table') ? 'battle' : 'main';
+        if (S.bgmTrack !== want) { S.bgmTrack = want; WG.Audio.bgm(want); }
+      }
+    } catch (e) { /* 没声音也能玩 */ }
+    var ov = (S.st && S.st.over) ? (S.st.over.loser === 0 ? 'lose' : 'win') : '';
+    if (ov) {
+      if (S.overSfx !== ov) { S.overSfx = ov; sfx(ov); }
+    } else {
+      S.overSfx = '';
+    }
+  }
+
   function render() {
     var app = document.getElementById('app');
     if (!app) return;
@@ -1127,14 +1267,30 @@
     else html = viewTable();
     app.innerHTML = html;
     scrollLog();
+    syncAudio();
     scheduleAi();
   }
 
   // ============================================================
   // 启动
   // ============================================================
+  // 浏览器不允许没有用户手势就出声：第一次点击时才初始化音频，然后按当前界面选 BGM。
+  // audio.js 缺席（或初始化失败）时整段静默跳过，不影响游戏。
+  function firstGesture() {
+    try {
+      if (window.WG && WG.Audio && WG.Audio.init) {
+        WG.Audio.init();
+        var track = (S.screen === 'mulligan' || S.screen === 'table') ? 'battle' : 'main';
+        WG.Audio.bgm(track);
+        S.bgmTrack = track;
+      }
+    } catch (e) { /* 没声音也能玩 */ }
+    document.removeEventListener('click', firstGesture, false);
+  }
+
   function boot() {
     if (document.addEventListener) document.addEventListener('click', onClick, false);
+    document.addEventListener('click', firstGesture, false);
     render();
   }
 

@@ -22,6 +22,10 @@
 
 界面截图在 [`assets/screens/`](assets/screens/)。
 
+牌桌是**上下对称的双人对峙**布局：对手的场面在上方（增益区在最外圈、单位位贴着中线），
+你的场面在下方镜像摆放，中央横条是双方生命与回合阶段，底部是手牌、牌组、弃牌堆与操作面板。
+对手打出的每一张牌都和你自己的牌一样以卡面形式留在桌上，随时能看清对面在做什么。
+
 完整规则见 **[`game/RULES.md`](game/RULES.md)**，游戏里也有「规则」按钮。
 
 ## 项目结构
@@ -31,7 +35,9 @@ game/
   index.html                    入口
   RULES.md                      规则书（权威版本）
   EFFECTS_API.md                效果系统接口契约
-  css/style.css                 样式
+  UI_ASSETS_API.md              卡面与音频接口契约
+  css/style.css                 通用样式（首页 / 组牌 / 换牌）
+  css/board2.css                对局牌桌样式
   js/
     data/cards.js               100 张卡数据（由 tools/gen_cards.py 生成，勿手改）
     engine/constants.js         常量与工具
@@ -39,6 +45,8 @@ game/
     engine/effects_core.js      效果框架 + 宽幅卡 76-100
     engine/effects_units_a.js   普通单位卡 1-38
     engine/effects_units_b.js   普通单位卡 39-75
+    ui/cardface.js              卡面插画（确定性 SVG 生成）
+    ui/audio.js                 音乐与音效（Web Audio 实时合成）
     ui/ui.js                    界面与 AI 对手
 tools/
   gen_cards.py                  xlsx → cards.js
@@ -46,10 +54,26 @@ tools/
   test_engine.js                引擎冒烟测试
   test_effects_a.js / _b.js     效果卡测试
   test_ui_dom.js                UI 防白屏测试
+  test_cardface.js              卡面渲染测试
+  test_audio.js                 音频合成测试
   test_soak.js                  随机对局压力测试（500 局）
 assets/src/                     原始设计材料 + 设计稿预览图
 assets/screens/                 界面截图
 ```
+
+## 卡面与声音：全部是代码生成的
+
+这个项目没有任何图片素材和音频文件，两样东西都在运行时现造：
+
+- **卡面**（`ui/cardface.js`）—— 以卡牌 id 为随机种子的 SVG。同样的 id 永远画出同一张图；
+  按分类分六套图形语言（等距竖条加连音弧 / 乐器线稿 / 站位点阵 / 五线谱音级 / 波形频谱 /
+  同心声场），宽幅卡另有一套表达「覆盖一片区域」的画法。
+- **音频**（`ui/audio.js`）—— Web Audio 实时合成，15 个音效（选中、出牌、落宽幅卡、攻击、
+  受击、破坏、升级、胜负……）加两条 BGM：主菜单是 72 BPM 的 D 大调五声循环，对局切到
+  96 BPM 的更硬版本。浏览器要求用户先有手势才允许出声，所以第一次点击才会初始化音频；
+  在那之前所有调用都静默返回。
+
+两者都是**软依赖**：文件缺失或抛错时界面会自动退化成纯文字卡面、没有声音，游戏照常能玩。
 
 ## 架构
 
@@ -73,6 +97,8 @@ node tools/test_engine.js        # 引擎与宽幅卡（30 断言）
 node tools/test_effects_a.js     # 单位卡 1-38（93 断言）
 node tools/test_effects_b.js     # 单位卡 39-75（90 断言）
 node tools/test_ui_dom.js        # UI 加载与防白屏（35 断言）
+node tools/test_cardface.js      # 卡面渲染（20 断言，100 张同 id 必同图）
+node tools/test_audio.js         # 音频合成（52 断言）
 node tools/test_soak.js 500      # 500 局随机对局，查死循环与状态不变量
 ```
 

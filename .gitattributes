@@ -1,0 +1,8 @@
+# 统一换行，避免 Windows 上产生无意义的 CRLF 差异
+* text=auto eol=lf
+
+# 二进制文件不做换行转换
+*.psd binary
+*.png binary
+*.xlsx binary
+*.docx binary

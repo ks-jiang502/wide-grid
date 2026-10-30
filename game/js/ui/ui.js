@@ -7,6 +7,7 @@
 
   var WG = window.WG || (window.WG = {});
   var E = WG.Engine;
+  var C = WG.C;
 
   var PHASE_CN = {
     start: '起始', draw: '抽牌', deploy: '部署',
@@ -22,6 +23,8 @@
     sel: -1,             // 选中的手牌下标
     selUid: null,        // 选中的己方单位 uid
     wideSel: 0,          // 选中的己方宽幅卡区域号
+    moveFrom: null,      // v0.3 正在整张移动的宽幅卡原区域号
+    surrenderAsk: false, // 投降需要二次确认
     play: null,          // 选中手牌的 canPlay 结果缓存
     pick: null,          // 目标选择面板状态
     note: '',            // 面板提示
@@ -196,6 +199,7 @@
     'pick-cancel': 'cancel', home: 'cancel',
     'mull-t': 'select', 'mull-ok': 'mulligan',
     'play-unit': 'play', 'play-wide': 'wide', 'wide-up': 'upgrade',
+    'wide-move': 'select', 'wide-move-to': 'upgrade',
     'atk-unit': 'attack', 'atk-face': 'attack', resolve: 'hit',
     'to-combat': 'turn', 'end-turn': 'turn'
   };
@@ -280,13 +284,46 @@
     if (act === 'pick-cancel') { S.pick = null; S.note = '已取消'; render(); return; }
 
     // ---- 升级宽幅卡 ----
-    if (act === 'wide-sel') { S.wideSel = Number(arg); render(); return; }
+    if (act === 'wide-sel') {
+      if (S.moveFrom && S.moveFrom !== Number(arg)) S.moveFrom = null;
+      S.wideSel = Number(arg);
+      render(); return;
+    }
+
+    // v0.3：投降要二次确认
+    if (act === 'surrender') { S.surrenderAsk = true; render(); return; }
+    if (act === 'surrender-no') { S.surrenderAsk = false; render(); return; }
+    if (act === 'surrender-yes') {
+      S.surrenderAsk = false;
+      E.surrender(st, 0);
+      render(); return;
+    }
     if (act === 'wide-up') {
       var ua = Number(arg);
       var chk = E.canUpgrade(st, 0, ua);
       if (!chk.ok) { S.note = chk.reason; render(); return; }
       var r = E.upgradeWide(st, 0, ua);
       S.note = r.ok ? ('已升级为强化形态（-' + chk.cost + ' 能量）') : r.reason;
+      render(); return;
+    }
+
+    // v0.3：升级后的宽幅卡移动 —— 先点卡上的「移动」，再点高亮的目标位置
+    if (act === 'wide-move') {
+      var ma = Number(arg);
+      var mc = E.canMoveWide(st, 0, ma);
+      if (!mc.ok) { S.note = mc.reason; render(); return; }
+      S.moveFrom = ma;
+      S.note = '选择一个高亮的宽幅位置放下';
+      render(); return;
+    }
+
+    if (act === 'wide-move-to') {
+      if (!S.moveFrom) { S.note = '请先选出要移动的宽幅卡'; render(); return; }
+      var to = [];
+      String(arg).split(',').forEach(function (x) { to.push(Number(x)); });
+      var mr = E.moveWide(st, 0, S.moveFrom, to);
+      S.note = mr.ok ? ('已移动到 ' + to.join('·') + ' 区，增益范围随之重算') : mr.reason;
+      S.moveFrom = null;
       render(); return;
     }
 
@@ -753,9 +790,12 @@
     h += oppField(st, op);
     h += vsBand(st, me, op);
     h += myField(st, me);
+    h += railLeft(me);
+    h += railRight(st, me);
     h += bottomBar(st, me);
     h += previewBox(me);
     h += pickBox();
+    h += phaseCueBox();
     if (S.rules) h += rulesOverlay();
     if (st.over) h += overOverlay(st);
     h += '</div></div>';
@@ -804,14 +844,14 @@
       return '<div class="owz covered"><div class="owz-shadow">区' + a
         + '<br>被《' + esc(cname(cov.cardId)) + '》覆盖</div></div>';
     }
-    return '<div class="owz"><span class="owz-empty">区' + a + ' 空</span></div>';
+    return '<div class="owz"><span class="owz-empty">攻击牌 ' + a + '</span></div>';
   }
 
   // 对手的单位：玩家在战斗阶段能点它发起攻击，所以这里必须是真的卡面而不是缩写
   function oppSlot(st, i, p) {
     var u = p.units[i];
     var area = areaOf(i);
-    var head = '<span class="us-no">' + (i + 1) + '<i>区' + area + '</i></span>';
+    var head = '<span class="us-no">位置 ' + (i + 1) + '<i>区' + area + '</i></span>';
     if (!u) {
       return '<div class="uslot empty">' + head + '<span class="us-empty">空位</span></div>';
     }
@@ -839,6 +879,54 @@
   }
 
   // ---- 中线：双方生命对峙 + 当前阶段 ----
+  var PHASE_EN = {
+    draw: 'DRAW PHASE',
+    deploy: 'DEPLOYMENT PHASE',
+    combat: 'COMBAT PHASE',
+    end: 'TURN END'
+  };
+
+  /**
+   * v0.3：每进入一个新阶段就在屏幕中央亮一次大字提示，
+   * 约 2 秒后自动收起，避免长期遮挡战场。只在阶段真正变化时触发。
+   */
+  function updatePhaseCue(st) {
+    if (!st || S.screen !== 'table') {
+      S.phaseCue = null;
+      S.cueKey = '';
+      return;
+    }
+    if (st.over) {
+      S.phaseCue = null;
+      S.cueKey = 'over';
+      return;
+    }
+    var key = st.turnCount + ':' + st.active + ':' + st.phase;
+    if (key === S.cueKey) return;
+    S.cueKey = key;
+    var mine = (st.active === 0);
+    S.phaseCue = {
+      cn: (mine ? '己方' : '对方') + phaseCN(st.phase) + '阶段',
+      en: (mine ? 'YOUR ' : "OPPONENT'S ") + (PHASE_EN[st.phase] || ''),
+      cls: (mine ? 'cue-mine cue-' : 'cue-opp cue-') + st.phase
+    };
+    if (S.cueTimer) clearTimeout(S.cueTimer);
+    S.cueTimer = setTimeout(function () {
+      S.cueTimer = null;
+      S.phaseCue = null;
+      render();
+    }, 2000);
+  }
+
+  function phaseCueBox() {
+    var c = S.phaseCue;
+    if (!c) return '';
+    return '<div class="phase-cue ' + c.cls + '">'
+      + '<span class="cue-cn">' + esc(c.cn) + '</span>'
+      + '<span class="cue-en">' + esc(c.en) + '</span>'
+      + '</div>';
+  }
+
   function vsBand(st, me, op) {
     var mine = (st.active === 0);
     var maxHp = WG.START_HP || 15;
@@ -875,17 +963,44 @@
   function bottomBar(st, me) {
     return '<div class="bottom">'
       + logBox(st)
+      + handBox(me)
+      + panelBox(st, me)
+      + '</div>';
+  }
+
+  // v0.3 PSD 把「定义牌 / 定义判定 / 弃牌堆」放在桌面左侧竖排，
+  // 「主牌组」放在右侧竖排，不再挤在底部条里。
+  function railLeft(me) {
+    return '<div class="rail rail-left">'
       + defCardBox(me)
       + defJudgeBox(me)
       + discardBox(me)
-      + handBox(me)
+      + '</div>';
+  }
+
+  function railRight(st, me) {
+    return '<div class="rail rail-right">'
       + deckBox(me)
-      + panelBox(st, me)
+      + hpBox(me)
+      + '</div>';
+  }
+
+  // 大号生命读数，对应 PSD 右侧的「血量」
+  function hpBox(p) {
+    var pct = Math.max(0, Math.min(100, Math.round(p.hp / C.START_HP * 100)));
+    return '<div class="flat hpbox">'
+      + '<div class="fl-name">血量</div>'
+      + '<div class="hp-big"><b>' + p.hp + '</b><span>/' + C.START_HP + '</span></div>'
+      + '<div class="hp-bar"><i style="width:' + pct + '%"></i></div>'
       + '</div>';
   }
 
   function refreshPlay() {
     S.play = null;
+    // 移动只在部署阶段有效，阶段一变就撤销选择
+    if (S.moveFrom && S.st && (S.st.over || S.st.phase !== 'deploy' || S.st.active !== 0)) {
+      S.moveFrom = null;
+    }
     if (!S.st || S.sel < 0) return;
     var p = S.st.players[0];
     if (!p.hand[S.sel]) { S.sel = -1; return; }
@@ -959,6 +1074,16 @@
       } else if (w.upgraded) {
         upBtn = '<span class="wc-up">已是强化形态</span>';
       }
+      // v0.3：升级后的宽幅卡可以在部署阶段移动，每回合一次
+      var mv = E.canMoveWide(st, 0, a);
+      var mvBtn = '';
+      if (mv.ok) {
+        mvBtn = (S.moveFrom === a)
+          ? '<span class="wc-up wc-move">点下方高亮位置放下</span>'
+          : '<button class="btn btn-min btn-alt" data-act="wide-move" data-arg="' + a + '">移动</button>';
+      } else if (S.moveFrom === a) {
+        mvBtn = '<span class="wc-up">' + esc(mv.reason || '现在不能移动') + '</span>';
+      }
       return '<div class="wide-zone wz' + a + '">'
         + '<div class="wide-card' + (w.upgraded ? ' up' : '') + selCls
         + '" data-act="wide-sel" data-arg="' + a + '">'
@@ -969,7 +1094,7 @@
         + ' · ' + esc(card(w.cardId).wcat || '增益') + '</div>'
         + '<div class="wc-area">' + areasText(w, a) + '</div>'
         + '<div class="wc-text">' + esc(card(w.cardId).text || '') + '</div>'
-        + upBtn
+        + upBtn + mvBtn
         + '</div></div>';
     }
 
@@ -978,6 +1103,21 @@
       return '<div class="wide-zone wz' + a + ' covered">'
         + '<div class="wide-shadow">区' + a + '<br>由《' + esc(cname(cov.cardId)) + '》跨区覆盖</div>'
         + '</div>';
+    }
+
+    // 移动中：高亮可以移动过去的位置
+    if (S.moveFrom) {
+      var mvT = E.canMoveWide(st, 0, S.moveFrom);
+      if (mvT.ok) {
+        for (var mi = 0; mi < mvT.targets.length; mi += 1) {
+          var tg = mvT.targets[mi];
+          if (tg.indexOf(a) >= 0) {
+            return '<div class="wide-zone wz' + a + ' placeable" data-act="wide-move-to" '
+              + 'data-arg="' + tg.join(',') + '">'
+              + '<div class="wide-empty">移到 ' + tg.join('·') + ' 区</div></div>';
+          }
+        }
+      }
     }
 
     // 空槽：宽幅卡可放？
@@ -993,7 +1133,7 @@
         + '<div class="wide-empty">放' + cand.join('·') + '区</div></div>';
     }
     return '<div class="wide-zone wz' + a + '">'
-      + '<div class="wide-empty">区' + a + '</div></div>';
+      + '<div class="wide-empty">攻击牌 ' + a + '</div></div>';
   }
 
   // ---- 单位位 ----
@@ -1001,7 +1141,7 @@
     var st = S.st;
     var u = p.units[i];
     var area = areaOf(i);
-    var head = '<span class="slot-no">' + (i + 1) + '<i>区' + area + '</i></span>';
+    var head = '<span class="slot-no">位置 ' + (i + 1) + '<i>区' + area + '</i></span>';
 
     if (u) {
       var atk = E.effAtk(st, u);
@@ -1089,6 +1229,10 @@
     } else if (mine && st.phase === 'deploy') {
       btns += '<button class="btn btn-alt" data-act="to-combat">进入战斗</button>';
       btns += '<button class="btn" data-act="end-turn">结束回合</button>';
+      btns += S.surrenderAsk
+        ? '<button class="btn btn-danger" data-act="surrender-yes">确认投降</button>'
+          + '<button class="btn btn-min" data-act="surrender-no">再想想</button>'
+        : '<button class="btn btn-min" data-act="surrender">投降</button>';
       btns += '<button class="btn btn-min" data-act="rules">规则</button>';
     } else if (mine && st.phase === 'combat') {
       if (S.selUid) {
@@ -1206,10 +1350,32 @@
   // ---- 结算浮层 ----
   function overOverlay(st) {
     var over = st.over;
-    var win = (over.loser === 1);
-    return '<div class="overlay"><div class="ov-card">'
-      + '<div class="ov-res">' + (win ? '你获胜' : '你落败') + '</div>'
+    var isDraw = !!over.draw;
+    var win = !isDraw && (over.loser === 1);
+    var cn = isDraw ? '平局' : (win ? '胜利' : '失败');
+    var en = isDraw ? 'DRAW' : (win ? 'VICTORY' : 'DEFEAT');
+    var p0 = st.players[0];
+    var p1 = st.players[1];
+    var u0 = 0, u1 = 0, i;
+    for (i = 0; i < p0.units.length; i += 1) if (p0.units[i]) u0 += 1;
+    for (i = 0; i < p1.units.length; i += 1) if (p1.units[i]) u1 += 1;
+    var rows = [
+      ['你的生命', p0.hp + ' / ' + C.START_HP],
+      ['对手生命', p1.hp + ' / ' + C.START_HP],
+      ['你的牌组', p0.deck.length + ' 张'],
+      ['对手牌组', p1.deck.length + ' 张'],
+      ['场上单位', u0 + ' 对 ' + u1],
+      ['总回合数', st.turnCount + ' 回合']
+    ];
+    var stats = '';
+    for (i = 0; i < rows.length; i += 1) {
+      stats += '<div class="ov-row"><span>' + rows[i][0] + '</span><b>' + rows[i][1] + '</b></div>';
+    }
+    return '<div class="overlay"><div class="ov-card' + (isDraw ? ' ov-draw' : '') + '">'
+      + '<div class="ov-res">' + cn + '</div>'
+      + '<div class="ov-en">' + en + '</div>'
       + '<div class="ov-reason">' + esc(over.reason || '') + '</div>'
+      + '<div class="ov-stats">' + stats + '</div>'
       + '<div class="ov-btns">'
       + '<button class="btn" data-act="restart">再来一局</button>'
       + '<button class="btn" data-act="home">返回首页</button>'
@@ -1223,9 +1389,9 @@
       + '<p><b>回合六阶段</b>：起始 → 抽牌 → 部署 → 定义 → 战斗 → 结束。界面只在「部署」和「战斗」两个阶段需要你操作。</p>'
       + '<p><b>能量</b>：初始 3 点、上限随回合 +1（最高 6），每回合回满式恢复 3 点。打出卡牌、升级宽幅卡都消耗能量。</p>'
       + '<p><b>部署</b>：单位卡放进 6 个单位位（区域 1/2/3 各两格）；宽幅卡放进 3 个增益区，跨区卡会一次占住多区。</p>'
-      + '<p><b>战斗</b>：点自己的单位发起攻击。敌人同区有单位则必须打单位（互相造成攻击力伤害），该区没有敌方单位才能直接打玩家；生命总和 15 点。伤害在整区结算时统一判定破坏。</p>'
-      + '<p><b>宽幅卡</b>：持续给覆盖区域的友方单位加成，可在部署阶段花能量升级为强化形态。被跨区卡覆盖的格子会显示虚线。</p>'
-      + '<p><b>结算</b>：谁的生命归零，或牌库抽空，谁就落败。</p>'
+      + '<p><b>战斗</b>：点自己的单位发起攻击。只要对方场上还有<b>任何一个</b>普通单位，就必须攻击同区域的敌方单位（互相造成攻击力伤害）；对方六个位置<b>全空</b>时才能直接打玩家。生命 15 点，伤害在整区结算时统一判定破坏。</p>'
+      + '<p><b>宽幅卡</b>：持续给覆盖区域的友方单位加成。可在部署阶段花能量升级为强化形态；<b>升级之后</b>每回合还能移动一次，换到别的空位置，增益范围随之重算。</p>'
+      + '<p><b>结算</b>：生命归零、需要抽牌时牌库已空、或主动投降的一方落败；双方同时满足则平局。</p>'
       + '<div class="rules-close"><button class="btn" data-act="rules-close">关闭</button></div>'
       + '</div></div>';
   }
@@ -1260,6 +1426,7 @@
   function render() {
     var app = document.getElementById('app');
     if (!app) return;
+    updatePhaseCue(S.st);
     var html;
     if (S.screen === 'welcome') html = viewWelcome();
     else if (S.screen === 'builder') html = viewBuilder();

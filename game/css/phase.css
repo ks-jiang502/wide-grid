@@ -1,0 +1,188 @@
+/* Wide-Grid · v0.3 阶段提示与宽幅卡配色
+ * 只作用于对局牌桌（.board.v2），加载在 board2.css 之后。
+ */
+
+/* ---------- 阶段提示：屏幕中央大字，短暂显示后收起 ---------- */
+.board.v2 .phase-cue {
+  position: absolute;
+  left: 50%;
+  top: 33%;
+  transform: translate(-50%, -50%);
+  z-index: 62;
+  pointer-events: none;
+  text-align: center;
+  white-space: nowrap;
+  padding: calc(1.05 * var(--u)) calc(3.4 * var(--u)) calc(1.15 * var(--u));
+  background: rgba(253, 252, 250, 0.96);
+  border: calc(0.13 * var(--u)) solid currentColor;
+  box-shadow: 0 calc(0.45 * var(--u)) calc(1.7 * var(--u)) rgba(27, 26, 23, 0.13);
+  animation: cuePop 0.26s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.board.v2 .phase-cue .cue-cn {
+  display: block;
+  font-size: max(calc(2.15 * var(--u)), 26px);
+  font-weight: 700;
+  line-height: 1.12;
+  letter-spacing: 0.2em;
+  text-indent: 0.2em;
+  color: currentColor;
+}
+
+.board.v2 .phase-cue .cue-en {
+  display: block;
+  margin-top: calc(0.46 * var(--u));
+  font-size: max(calc(0.82 * var(--u)), 10px);
+  letter-spacing: 0.28em;
+  text-indent: 0.28em;
+  opacity: 0.7;
+  color: currentColor;
+}
+
+/* 己方：蓝 / 绿 / 蓝紫 / 灰 */
+.board.v2 .phase-cue.cue-mine.cue-draw { color: #2f6fa8; }
+.board.v2 .phase-cue.cue-mine.cue-deploy { color: #2f7a4f; }
+.board.v2 .phase-cue.cue-mine.cue-combat { color: #554a9c; }
+.board.v2 .phase-cue.cue-mine.cue-end { color: #6b6b66; }
+
+/* 对方：红 / 橙 / 深红 / 深灰 */
+.board.v2 .phase-cue.cue-opp.cue-draw { color: #b03a2e; }
+.board.v2 .phase-cue.cue-opp.cue-deploy { color: #c26a1b; }
+.board.v2 .phase-cue.cue-opp.cue-combat { color: #8c2a20; }
+.board.v2 .phase-cue.cue-opp.cue-end { color: #4a4a46; }
+
+@keyframes cuePop {
+  from {
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(0.93);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1);
+  }
+}
+
+/* ---------- 宽幅卡与普通单位卡要一眼分得开 ---------- */
+/* 主牌（普通单位）保持米白纸面；宽幅卡改成冷灰蓝底 + 左侧色带。 */
+.board.v2 .wide-zone {
+  background: rgba(238, 242, 247, 0.9);
+  border-color: #a8b6c4;
+}
+
+.board.v2 .wide-card {
+  background: #eef3f8;
+  border-color: #9fb0c0;
+  border-left: calc(0.34 * var(--u)) solid #4a6f8f;
+}
+
+.board.v2 .wide-card.upgraded {
+  background: #e4edf6;
+  border-color: #6f8ca8;
+  border-left-color: #2f4d68;
+}
+
+.board.v2 .wide-card .wc-name,
+.board.v2 .owz .owz-name {
+  color: #26405a;
+}
+
+.board.v2 .wide-card .wc-meta,
+.board.v2 .owz .owz-meta {
+  color: #5f7a92;
+}
+
+/* 对手宽幅卡同样区分 */
+.board.v2 .owz {
+  background: rgba(238, 242, 247, 0.9);
+  border-color: #a8b6c4;
+}
+
+/* 宽幅卡上的移动提示 / 危险按钮 */
+.board.v2 .wc-up.wc-move {
+  color: #2f5d8a;
+}
+
+/* 「位置 3」后面紧跟的「区2」需要一点间隔 */
+.board.v2 .slot-no i,
+.board.v2 .us-no i {
+  margin-left: 0.55em;
+  opacity: 0.85;
+}
+
+.btn.btn-danger {
+  background: #9c2b22;
+  border-color: #7a1f18;
+  color: #fdfcfa;
+}
+
+/* ---------- 结算层：胜负 / 平局 + 本局统计 ---------- */
+.ov-card .ov-en {
+  margin-top: calc(-0.2 * var(--u));
+  font-size: max(calc(0.78 * var(--u)), 10px);
+  letter-spacing: 0.34em;
+  text-indent: 0.34em;
+  color: #837c6e;
+}
+
+.ov-card .ov-stats {
+  margin: calc(0.9 * var(--u)) auto calc(0.5 * var(--u));
+  width: 78%;
+  border-top: 1px solid #ddd7c9;
+  padding-top: calc(0.6 * var(--u));
+}
+
+.ov-card .ov-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  padding: calc(0.2 * var(--u)) 0;
+  font-size: max(calc(0.72 * var(--u)), 11px);
+  color: #5e574b;
+}
+
+.ov-card .ov-row b {
+  font-size: max(calc(0.82 * var(--u)), 12px);
+  font-weight: 700;
+  color: #1b1a17;
+}
+
+.ov-card.ov-draw .ov-res {
+  color: #4a4a46;
+}
+
+/* ============ v0.3：左右两侧资源栏（对应 PSD 的左侧定义牌/判定/弃牌堆、右侧主牌组/血量） ============ */
+.board.v2 .rail {
+  position: absolute;
+  display: flex;
+  flex-direction: column;
+  gap: calc(0.7 * var(--u));
+  width: calc(8.6 * var(--u));
+  z-index: 6;
+  pointer-events: none;
+}
+.board.v2 .rail > * { pointer-events: auto; }
+.board.v2 .rail-left  { left: calc(0.9 * var(--u));  top: calc(23.8 * var(--u)); }
+.board.v2 .rail-right { right: calc(0.9 * var(--u)); top: calc(23.8 * var(--u)); }
+
+.board.v2 .rail .flat {
+  flex: 0 0 auto;
+  width: 100%;
+  height: auto;
+  min-height: calc(4.6 * var(--u));
+  padding: calc(0.42 * var(--u)) calc(0.48 * var(--u));
+  box-sizing: border-box;
+}
+.board.v2 .rail .fl-name { font-size: max(calc(0.62 * var(--u)), 10px); }
+.board.v2 .rail .fl-big  { font-size: max(calc(1.25 * var(--u)), 17px); }
+.board.v2 .rail .fl-txt  { font-size: max(calc(0.56 * var(--u)), 9px); line-height: 1.45; }
+.board.v2 .rail .fl-note { font-size: max(calc(0.52 * var(--u)), 9px); line-height: 1.4; }
+
+/* 右侧血量块 */
+.board.v2 .hpbox { display: flex; flex-direction: column; gap: calc(0.22 * var(--u)); }
+.board.v2 .hp-big { font-size: max(calc(1.7 * var(--u)), 23px); font-weight: 700; line-height: 1; }
+.board.v2 .hp-big span { font-size: max(calc(0.7 * var(--u)), 11px); color: var(--muted); margin-left: 0.18em; }
+.board.v2 .hp-bar { height: calc(0.42 * var(--u)); background: #e6e1d4; border-radius: 999px; overflow: hidden; }
+.board.v2 .hp-bar i { display: block; height: 100%; background: #2f5d50; border-radius: 999px; }
+
+/* 底部条只剩 日志 / 手牌 / 面板，手牌区拿到更多横向空间 */
+.board.v2 .bottom > .handzone { flex: 1 1 auto; min-width: 0; }

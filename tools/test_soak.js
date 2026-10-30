@@ -194,6 +194,9 @@ function greedyCombat(st, side, rnd) {
   let target;
   if (legal.face) {
     target = { type: 'face' };
+  } else if (!legal.units.length) {
+    // v0.3：对方主卡区域还有单位、但本攻击区是空的 -> 本单位本回合无合法目标
+    return false;
   } else {
     // 优先打能打死的，否则打攻击力最低的
     let best = null;

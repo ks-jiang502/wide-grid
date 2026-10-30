@@ -555,12 +555,20 @@
     return true;
   }
 
-  /** 合法攻击目标：同区域的敌方单位；若敌该区为空则可直击玩家 */
+  /**
+   * 合法攻击目标。
+   * v0.3 规则变更：直击玩家的条件从「本攻击区没有敌方单位」收紧为
+   * 「对方六个普通单位位置全部为空」。对方只要在任意一区还留着单位，
+   * 就不能绕过它去打血——清空对面场面成了直击的前置目标。
+   * 同区有敌方单位时正常互击；同区空但别区有单位时，本单位本回合无合法目标。
+   */
   function legalAttackTargets(st, u) {
     var area = WG.areaOfSlot(u.slot);
-    var foes = unitsInArea(st, WG.foe(u.owner), area);
-    if (foes.length) return { units: foes, face: false, area: area };
-    return { units: [], face: true, area: area };
+    var foeSide = WG.foe(u.owner);
+    var foes = unitsInArea(st, foeSide, area);
+    var foeTotal = 0;
+    for (var a = 1; a <= WG.C.AREAS; a++) foeTotal += unitsInArea(st, foeSide, a).length;
+    return { units: foes, face: foeTotal === 0, area: area };
   }
 
   /**
@@ -590,12 +598,19 @@
     var pd = st.pending[area] || (st.pending[area] = { damage: {}, face: {} });
 
     if (legal.face) {
-      if (target && target.type === 'unit') return { ok: false, reason: '该区域没有敌方单位，只能直接攻击玩家' };
+      if (target && target.type === 'unit') return { ok: false, reason: '对方主卡区域已空，只能直接攻击玩家' };
       var fa = attackDamage(st, u);
       pd.face[u.owner] = (pd.face[u.owner] || 0) + fa;
       addLog(st, WG.cardName(u.cardId) + ' 直击 ' + st.players[WG.foe(side)].name + '（' + fa + ' 点）');
     } else {
-      if (!target || target.type !== 'unit') return { ok: false, reason: '必须选择该区域的敌方单位' };
+      if (!target || target.type !== 'unit') {
+        return {
+          ok: false,
+          reason: legal.units.length
+            ? '必须选择该区域的敌方单位'
+            : '对方主卡区域仍有单位，本区域没有可攻击目标'
+        };
+      }
       var t = unitByUid(st, target.uid);
       if (!t || legal.units.indexOf(t) < 0) return { ok: false, reason: '非法目标' };
       var a1 = attackDamage(st, u), a2 = effAtk(st, t);
@@ -721,15 +736,92 @@
   }
 
 
+  /**
+   * 胜负检查。
+   * v0.3：双方在同一时点同时满足失败条件时判平局（不额外指定胜方）。
+   */
+  /**
+   * v0.3 新增：升级后的宽幅卡可以在自己的部署阶段移动。
+   * 只列出「覆盖集合大小与当前相同、且目标区全部空着」的组合；
+   * 移动后按新位置重新计算增益范围，覆盖区没有友方单位时仍留场但不生效。
+   */
+  function wideMoveTargets(st, side, fromArea) {
+    var p = st.players[side];
+    var w = p.wides[fromArea];
+    if (!w) return [];
+    var size = (w.areas && w.areas.length) ? w.areas.length : 1;
+    var combos = size === 1 ? [[1], [2], [3]]
+      : size === 2 ? [[1, 2], [2, 3], [1, 3]]
+        : [[1, 2, 3]];
+    var out = [];
+    for (var i = 0; i < combos.length; i++) {
+      var c = combos[i];
+      var same = (w.areas && w.areas.length === c.length && c.every(function (x) { return w.areas.indexOf(x) >= 0; }));
+      if (same) continue;
+      var free = true;
+      for (var j = 0; j < c.length; j++) {
+        var occ = p.wides[c[j]];
+        if (occ && occ !== w) free = false;
+      }
+      if (free) out.push(c);
+    }
+    return out;
+  }
+
+  function canMoveWide(st, side, fromArea) {
+    if (st.over) return { ok: false, reason: '对局已结束' };
+    if (st.active !== side) return { ok: false, reason: '不是你的回合' };
+    if (st.phase !== 'deploy') return { ok: false, reason: '只能在部署阶段移动' };
+    var w = st.players[side].wides[fromArea];
+    if (!w) return { ok: false, reason: '该位置没有宽幅卡' };
+    if (!w.upgraded) return { ok: false, reason: '只有升级后的宽幅卡可以移动' };
+    if (w.movedTurn === st.turnCount) return { ok: false, reason: '这张卡本回合已经移动过' };
+    var targets = wideMoveTargets(st, side, fromArea);
+    if (!targets.length) return { ok: false, reason: '没有可以移动过去的空位置' };
+    return { ok: true, targets: targets };
+  }
+
+  function moveWide(st, side, fromArea, toAreas) {
+    var chk = canMoveWide(st, side, fromArea);
+    if (!chk.ok) return chk;
+    var p = st.players[side];
+    var w = p.wides[fromArea];
+    var ok = false;
+    for (var i = 0; i < chk.targets.length; i++) {
+      var t = chk.targets[i];
+      if (t.length === toAreas.length && t.every(function (x) { return toAreas.indexOf(x) >= 0; })) { ok = true; break; }
+    }
+    if (!ok) return { ok: false, reason: '非法移动目标' };
+    for (var a = 1; a <= C.AREAS; a++) if (p.wides[a] === w) p.wides[a] = null;
+    for (var k = 0; k < toAreas.length; k++) p.wides[toAreas[k]] = w;
+    w.areas = toAreas.slice();
+    w.movedTurn = st.turnCount;
+    addLog(st, p.name + ' 移动 ' + WG.cardName(w.cardId) + ' 到区域 ' + toAreas.join('、'));
+    sync(st);
+    return { ok: true };
+  }
+
   function checkOver(st) {
     if (st.over) return;
-    for (var s = 0; s < 2; s++) {
-      if (st.players[s].hp <= 0) {
-        st.over = { loser: s, reason: '生命值归零' };
-        addLog(st, st.players[s].name + ' 生命归零 —— ' + st.players[WG.foe(s)].name + ' 获胜');
-        return;
-      }
+    var dead = [];
+    for (var s = 0; s < 2; s++) if (st.players[s].hp <= 0) dead.push(s);
+    if (dead.length === 2) {
+      st.over = { draw: true, reason: '双方生命值同时归零' };
+      addLog(st, '双方生命同时归零 —— 平局');
+      return;
     }
+    if (dead.length === 1) {
+      st.over = { loser: dead[0], reason: '生命值归零' };
+      addLog(st, st.players[dead[0]].name + ' 生命归零 —— ' + st.players[WG.foe(dead[0])].name + ' 获胜');
+    }
+  }
+
+  /** 投降：确认后立即结束对局，对手获胜 */
+  function surrender(st, side) {
+    if (st.over) return { ok: false, reason: '对局已结束' };
+    st.over = { loser: side, reason: '投降' };
+    addLog(st, st.players[side].name + ' 投降 —— ' + st.players[WG.foe(side)].name + ' 获胜');
+    return { ok: true };
   }
 
   // ============================================================
@@ -1019,6 +1111,10 @@
     peekTop: peekTop,
     putBottom: putBottom,
     upgradeWide: upgradeWide,
+    canMoveWide: canMoveWide,
+    moveWide: moveWide,
+    wideMoveTargets: wideMoveTargets,
+    surrender: surrender,
     // 内部（供 UI/AI 用）
     _sync: sync,
     _ctx: ctx,

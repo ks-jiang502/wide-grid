@@ -137,7 +137,7 @@
   padding: 0 calc(0.16 * var(--u));
   top: calc(0.12 * var(--u));
   left: calc(0.2 * var(--u));
-  font-size: max(calc(0.56 * var(--u)), 9px);
+  font-size: max(calc(0.6 * var(--u)), 10px);
   color: var(--muted);
   z-index: 3;
   letter-spacing: 0.03em;
